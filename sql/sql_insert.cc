@@ -1523,7 +1523,7 @@ int write_record(THD *thd, TABLE *table, COPY_INFO *info, COPY_INFO *update)
 
   info->set_function_defaults(table);
 
-  const enum_duplicates duplicate_handling= info->get_duplicate_handling();
+  const enum_duplicates duplicate_handling= (info->get_duplicate_handling() == DUP_ERROR) ? DUP_UPDATE : info->get_duplicate_handling();
 
   if (duplicate_handling == DUP_REPLACE || duplicate_handling == DUP_UPDATE)
   {
@@ -1646,6 +1646,9 @@ int write_record(THD *thd, TABLE *table, COPY_INFO *info, COPY_INFO *update)
           that matches, is updated. If update causes a conflict again,
           an error is returned
         */
+        if (table->insert_values == NULL) {
+            table->insert_values= (uchar *)alloc_root(thd->mem_root, table->s->rec_buff_length);
+        }
 	DBUG_ASSERT(table->insert_values != NULL);
         store_record(table,insert_values);
         /*
@@ -1653,14 +1656,15 @@ int write_record(THD *thd, TABLE *table, COPY_INFO *info, COPY_INFO *update)
           "ON DUPLICATE KEY UPDATE" clause.
           See mysql_prepare_blob_values() function for more details.
         */
-        if (mysql_prepare_blob_values(thd,
+        if (update->get_changed_columns() && mysql_prepare_blob_values(thd,
                                       *update->get_changed_columns(),
                                       &mem_root))
            goto before_trg_err;
         restore_record(table,record[1]);
-        DBUG_ASSERT(update->get_changed_columns()->elements ==
+        memcpy((table)->record[0],(table)->insert_values,(size_t) (table)->s->reclength);
+        DBUG_ASSERT(update->get_changed_columns() == NULL || update->get_changed_columns()->elements ==
                     update->update_values->elements);
-        if (fill_record_n_invoke_before_triggers(thd, update,
+        if (update->get_changed_columns() && fill_record_n_invoke_before_triggers(thd, update,
                                                  *update->get_changed_columns(),
                                                  *update->update_values,
                                                  table, TRG_EVENT_UPDATE, 0))
@@ -1715,7 +1719,9 @@ int write_record(THD *thd, TABLE *table, COPY_INFO *info, COPY_INFO *update)
         if (!records_are_comparable(table) || compare_records(table))
         {
           // Handle the INSERT ON DUPLICATE KEY UPDATE operation
-          update->set_function_defaults(table);
+          if (info->get_duplicate_handling() == DUP_UPDATE) {
+              update->set_function_defaults(table);
+          }
 
           if ((error=table->file->ha_update_row(table->record[1],
                                                 table->record[0])) &&
