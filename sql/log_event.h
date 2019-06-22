@@ -3060,6 +3060,7 @@ protected:
 
 #ifdef MYSQL_SERVER
   TABLE *m_table;		/* The table the rows belong to */
+  int m_find_pos_error;
 #endif
   MY_BITMAP   m_cols;		/* Bitmap denoting columns available */
 #ifndef MYSQL_CLIENT

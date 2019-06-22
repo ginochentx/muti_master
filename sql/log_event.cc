@@ -9139,6 +9139,9 @@ Rows_log_event::Rows_log_event(THD *thd_arg, TABLE *tbl_arg, const Table_id& tid
     m_distinct_keys(Key_compare(&m_key_info)), m_distinct_key_spare_buf(NULL)
 #endif
 {
+#ifdef MYSQL_SERVER
+  m_find_pos_error = 0;
+#endif
   common_header->type_code= m_type;
   m_row_count= 0;
   m_table_id= tid;
@@ -9218,6 +9221,9 @@ Rows_log_event::Rows_log_event(const char *buf, uint event_len,
     m_distinct_keys(Key_compare(&m_key_info)), m_distinct_key_spare_buf(NULL)
 #endif
 {
+#ifdef MYSQL_SERVER
+  m_find_pos_error = 0;
+#endif
   DBUG_ENTER("Rows_log_event::Rows_log_event(const char*,...)");
 
   DBUG_ASSERT(header()->type_code == m_type);
@@ -10452,6 +10458,11 @@ INDEX_SCAN:
 end:
 
   DBUG_ASSERT(error != HA_ERR_RECORD_DELETED);
+
+  if (HA_ERR_KEY_NOT_FOUND == error) {
+      m_find_pos_error = error;
+      error = 0;
+  }
 
   if (error && error != HA_ERR_RECORD_DELETED)
     m_table->file->print_error(error, MYF(0));
@@ -12963,9 +12974,14 @@ Update_rows_log_event::do_exec_row(const Relay_log_info *const rli)
   DBUG_DUMP("new values", m_table->record[0], m_table->s->reclength);
 
   m_table->mark_columns_per_binlog_row_image();
-  error= m_table->file->ha_update_row(m_table->record[1], m_table->record[0]);
-  if (error == HA_ERR_RECORD_IS_THE_SAME)
-    error= 0;
+
+  if (m_find_pos_error == HA_ERR_KEY_NOT_FOUND) {
+      error= m_table->file->ha_write_row(m_table->record[0]);
+  } else {
+      error= m_table->file->ha_update_row(m_table->record[1], m_table->record[0]);
+      if (error == HA_ERR_RECORD_IS_THE_SAME)
+          error= 0;
+  }
   m_table->default_column_bitmaps();
 
   return error;
