@@ -10811,6 +10811,11 @@ int Rows_log_event::do_table_scan_and_update(Relay_log_info const *rli)
 end:
 
   DBUG_ASSERT(error != HA_ERR_RECORD_DELETED);
+  if (HA_ERR_END_OF_FILE == error) {
+      restore_record(m_table, record[1]);
+      m_find_pos_error = error;
+      error = 0;
+  }
 
   /* either we report error or apply the changes */
   if (error && error != HA_ERR_RECORD_DELETED)
@@ -12975,7 +12980,7 @@ Update_rows_log_event::do_exec_row(const Relay_log_info *const rli)
 
   m_table->mark_columns_per_binlog_row_image();
 
-  if (m_find_pos_error == HA_ERR_KEY_NOT_FOUND) {
+  if (m_find_pos_error == HA_ERR_KEY_NOT_FOUND || m_find_pos_error == HA_ERR_END_OF_FILE) {
       error= m_table->file->ha_write_row(m_table->record[0]);
   } else {
       error= m_table->file->ha_update_row(m_table->record[1], m_table->record[0]);
